@@ -22,6 +22,7 @@ This app preserves Quip data in a downloadable archive and lets users inspect ca
 - Keep Markdown soft-wrapped: write each paragraph or list item on one source line and let the editor wrap it visually.
 - Do not use worktrees without asking the user first.
 - Use Context7 for current library, framework, SDK, API, CLI, and cloud-service documentation, including familiar tools. Resolve the library ID first unless the user supplied an exact ID, then query the relevant documentation. Prefer official sources and Context7 over general web search for library docs. Documentation lookup is not required for ordinary refactoring, business-logic debugging, code review, or general programming concepts.
+- Treat security warnings pragmatically: assess whether the affected code and exploit conditions are reachable in the app or development workflows we actually use. It is OK to ignore unreachable or inapplicable findings. Prioritize actionable risks; avoid dependency churn, overrides, or unrelated remediation solely to clear an audit report. Keep routine audit results out of the README and surface warnings only when they materially affect the work or require a decision.
 
 ## Commit messages
 
