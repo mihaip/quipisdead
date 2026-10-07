@@ -11,6 +11,7 @@ This app preserves Quip data in a downloadable archive and lets users inspect ca
 - Roughly follow the official [Cloudflare Hono guide](https://developers.cloudflare.com/workers/framework-guides/web-apps/more-web-frameworks/hono/), using Cloudflare's Vite plugin and standard tooling where applicable.
 - Prefer Workers-only hosting. Start with a simple deployment structure and split Workers when concrete execution or configuration needs justify it.
 - Use strict TypeScript and preserve type safety across client/server boundaries. Prefer Hono's typed client and inferred request/response types over duplicated interfaces, unchecked casts, or hand-maintained clients.
+- Assume the frontend and Worker API stay in sync, with any version compatibility handled transparently at the deployment or API boundary. Trust inferred response types for our own API rather than adding defensive response-shape checks; continue validating untrusted external inputs.
 - Validate untrusted inputs at runtime; compile-time types do not validate network data. Define schemas once and derive types where practical.
 - Minimize boilerplate, but keep control flow and network boundaries clear. Small libraries that remove recurring work are welcome; hand-rolled code is not a goal in itself. Avoid abstractions that obscure straightforward code.
 - Keep HTTP handlers thin and capture/normalization logic in ordinary TypeScript modules that background handlers can also call.
