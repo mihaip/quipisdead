@@ -5,7 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json && tsc -p tsconfig.node.json",
+    "db:migrate": "wrangler d1 migrations apply DB --local",
+    "db:generate": "drizzle-kit generate",
+    "cf:types": "wrangler types",
+    "pretypecheck": "npm run cf:types",
+    "test": "tsx --test tests/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json && tsc -p tsconfig.node.json && tsc -p tsconfig.test.json",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "deploy": "npm run build && wrangler deploy"
@@ -15,9 +20,11 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.1",
+    "drizzle-orm": "^0.45.3",
     "hono": "^4.13.13",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.63.0",
@@ -25,6 +32,9 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "drizzle-kit": "^0.31.11",
+    "miniflare": "^5.20261006.0-alpha",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.3",
     "wrangler": "^4.148.0"

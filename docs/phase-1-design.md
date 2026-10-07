@@ -111,6 +111,28 @@ Keep OAuth, personal-token and future session credentials behind separate adapte
 
 App access must survive token expiry and eventual Quip shutdown for the short remaining artifact lifetime. Propose an independent opaque recovery credential, delivered at creation, with a normal secure browser session. Losing that credential may require reconnecting while Quip is still available. Decide whether email/account recovery is worth adding before public launch.
 
+### Implemented account/session slice
+
+The October 7, 2026 slice uses one shared Cloudflare D1 database for app users, credentials, and sessions, behind the existing React/Vite SPA and Hono Worker. It has no KV, Durable Objects, capture jobs, queues, or archive artifacts. Drizzle's SQLite schema and SQL-style query builder infer persistence results through Hono to the frontend, without hand-maintained profile row interfaces. Focused persistence functions keep this boundary small; later capture infrastructure remains a separate implementation decision.
+
+Drizzle ORM uses its native D1 driver over the existing binding, with query logging disabled. Drizzle Kit generates reviewable SQL from `src/worker/db/schema.ts` using the committed migration snapshots; Wrangler applies migrations locally or remotely. The initial `0000_accounts.sql` is generated directly from the Drizzle schema, including the composite identity index, foreign keys, and session indexes. This setup needs no runtime migration runner, relation declarations, repository classes, or schema push. [Drizzle D1 support](https://orm.drizzle.team/docs/sqlite/connect-cloudflare-d1), [typed batches](https://orm.drizzle.team/docs/sqlite/batch-api), [migration generation](https://orm.drizzle.team/docs/drizzle-kit-generate).
+
+An app user has an internal random UUID and a unique `(quip_origin, quip_user_id)` identity. Email is a nullable indexed display/search attribute, never an identity or authorization key; Quip may omit it. The first adapter supports only `https://platform.quip.com` and sends PATs only to that approved API origin. Adding custom sites requires explicit origin validation; no arbitrary user-supplied fetch URL is accepted.
+
+Sign-in validates the PAT with `GET /1/users/current`, parses the external identity response at runtime, and atomically upserts the user, owned credential, and new session in D1. Only profile fields needed by this slice are retained. Credentials live in a separate user-owned table; the current slice saves one PAT per account. AES-256-GCM uses a fresh 96-bit nonce for each write and authenticates the Quip origin and user ID as additional data. A versioned ciphertext envelope is stored in D1; a 32-byte base64 key comes from the `CREDENTIAL_ENCRYPTION_KEY` Worker secret. Local development uses an ignored `.dev.vars` file. The key is not in the database, client, source control, or logs. Key rotation requires re-encrypting saved credentials before removing the old key.
+
+The app creates a cryptographically random 256-bit session token and sends it only as a `__Host-quip_session` cookie with Secure, HttpOnly, SameSite=Lax, Path=/, and no Domain. D1 retains only the SHA-256 token hash, owning user ID, and fixed 30-day expiry. Every authenticated lookup joins the session and user and enforces `expires_at > now`; cleanup is never the expiration mechanism. Cookie-based mutations require an exact same-origin `Origin` and reject cross-site Fetch Metadata; PAT submissions require validated JSON and bounded request bodies. API responses use `Cache-Control: no-store`. Browser profile reads do not change cookies, avoiding a stale read clearing a newly issued session.
+
+Wrap the D1 binding directly with `drizzle(binding)` for authentication and revocation reads. Queries without the D1 Sessions API go to the primary database, including when read replication is enabled; `first-primary` in a reused D1 session would guarantee only the first query goes to primary. Keep this primary-read requirement if future explorer queries introduce replicas. Atomic write batches use Drizzle's `.batch()` over D1; do not substitute an interactive transaction callback. [D1 binding and batch semantics](https://developers.cloudflare.com/d1/worker-api/d1-database/), [read replication](https://developers.cloudflare.com/d1/best-practices/read-replication/).
+
+Replacement validates the new PAT against the persisted origin and Quip user ID, then updates the encrypted credential and profile in an atomic batch. Each write checks that the authenticating session is still present and unexpired after the Quip request, so a concurrent sign-out or deletion cannot recreate credentials. Sign-out revokes only the current session and clears its cookie; the account, saved credential, and other browser sessions remain. Account deletion requires an unexpired session and uses one user DELETE with foreign-key cascades to atomically remove the account, credentials, and all owned sessions. It makes no Quip request and never deletes a source account or source content. Signing in again explicitly creates a fresh local app account.
+
+Successful responses project only profile fields and credential-update time, never PATs or ciphertext. External failure bodies and exception details are not logged or forwarded. The Quip request has a timeout and uses `redirect: "manual"`, rejecting 3xx responses without forwarding credentials; Workers does not support `redirect: "error"`. The UI keeps PAT input transient and clears it on submission, with no browser persistent storage. The existing app session continues to work if Quip credentials expire; a new browser or an expired app session still needs a current PAT. The proposed independent recovery credential is not implemented in this slice.
+
+Deletion removes active rows immediately, but Cloudflare's always-on D1 Time Travel backups can retain prior records for seven days on Workers Free or thirty days on Workers Paid. Disclose this separately from active app-data deletion, including that encrypted credentials and hashed sessions can remain in backups. A database restore must reapply deletions and revoke restored sessions before reopening traffic; a restore must not silently make deleted accounts accessible again. [D1 backup retention](https://developers.cloudflare.com/d1/reference/time-travel/).
+
+Local migration, isolated verification, encryption-key setup, and deployment commands are documented in the [README](../README.md). The Worker configuration identifies the shared production D1 database; the production encryption key is provisioned separately as a Worker secret. Tests cover auth failures, revoked/expired sessions, wrong-identity replacement, revocation during replacement, transaction rollback, encrypted storage, and atomic deletion against isolated local D1.
+
 ## 4. Download format
 
 **Confirmed format: one portable ZIP containing SQLite and content-addressed files.** The operational database and the downloadable database need not be the same physical database.
@@ -165,9 +187,12 @@ Failure to render one feature must preserve its raw content and visibly report t
 
 ## 6. Cloudflare architecture
 
+The current account slice runs in one Worker with a shared D1 database. The diagram below is the proposed later capture architecture; only the browser, API, D1 account storage, and Quip identity validation are implemented today.
+
 ```mermaid
 flowchart LR
   Browser[Web app] --> API[Worker: sessions and export API]
+  API --> D1[Shared D1: app accounts, credentials and sessions]
   API --> Coordinator[Per-account Durable Object: job state and scheduler]
   Coordinator --> Queue[Queues: bounded capture tasks]
   Queue --> Capture[Capture Worker]
@@ -184,9 +209,9 @@ flowchart LR
   R2 --> Download
 ```
 
-Proposed implementation is TypeScript for the web/backend capture layer, with a small runtime-neutral acquisition/normalization core. Choose the UI framework when implementation starts; it does not determine archival fidelity.
+The implemented web/backend stack is a client-rendered React/Vite SPA with a Hono API in one Cloudflare Worker, using Hono's inferred client types and TanStack Query. Later acquisition/normalization logic should remain in ordinary TypeScript modules callable by HTTP and background handlers. SSR is not required.
 
-Use one SQLite-backed Durable Object per source account for work scheduling, leases, compact normalized explorer indexes, credential replacement coordination and user-level rate limiting. Add company-level coordination when multiple hosted users share a company limit. Use R2 for raw bodies, files and final artifacts. A small shared D1 database is optional for app-session/export lookup; it should not hold every document body.
+The shared D1 database is the chosen app-account, credential, and session store; it should not hold every document body. A proposed later SQLite-backed Durable Object per source account can own work scheduling, leases, compact normalized explorer indexes and user-level rate limiting when those execution needs justify it. Add company-level coordination when multiple hosted users share a company limit. Use R2 for raw bodies, files and final artifacts. Credential replacement already uses D1 and does not require a Durable Object.
 
 Queues deliver bounded jobs; the persisted task ledger is authoritative. Workflows are an alternative for phase orchestration, not an additional requirement in v1. Avoid one enormous workflow with a step per record.
 

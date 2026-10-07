@@ -3,7 +3,12 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  plugins: [react(), cloudflare()],
+  plugins: [
+    react(),
+    cloudflare({
+      persistState: { path: process.env.QUIP_LOCAL_STATE_PATH ?? '.wrangler/state' },
+    }),
+  ],
   server: {
     port: 5173,
     strictPort: true,
