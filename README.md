@@ -2,7 +2,7 @@
 
 Quip archive is a project for preserving Quip data in a downloadable archive and browsing captured data in a hosted explorer. Product requirements live in [the PRD](docs/phase-1-prd.md); architecture and research decisions live in [the technical design](docs/phase-1-design.md).
 
-The app uses a client-rendered React + Vite + TypeScript SPA and a Hono API, served by one Cloudflare Worker. Hono's typed client infers request and response types from the server routes.
+The app uses a client-rendered React + Vite + TypeScript SPA and a Hono API, served by one Cloudflare Worker. Hono's typed client infers request and response types from the server routes; TanStack Query manages frontend data loading and caching.
 
 ## Setup
 
