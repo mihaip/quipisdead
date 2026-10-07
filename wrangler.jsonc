@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "quipisdead",
+  "account_id": "2ccb840de076261467812cbc32f8aa47",
+  "workers_dev": true,
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-10-06",
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  }
+}
