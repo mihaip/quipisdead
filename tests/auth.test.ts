@@ -22,7 +22,7 @@ const mf = new Miniflare(convertV4MiniflareOptions({
   compatibilityDate: '2026-10-06',
   d1Databases: { DB: 'auth-tests' },
 }));
-let env: Bindings;
+let env: Pick<Bindings, 'DB' | 'CREDENTIAL_ENCRYPTION_KEY'>;
 let upstreamCalls: number;
 let quipReply: (token: string) => Response | Promise<Response>;
 const nativeFetch = globalThis.fetch;

@@ -83,7 +83,7 @@ export const authRoutes = new Hono<WorkerEnv>()
   })
   .delete('/account', async (c) => {
     const hash = await sessionHash(c);
-    const deleted = hash ? await deleteAccount(c.env.DB, hash) : false;
+    const deleted = hash ? await deleteAccount(c.env.DB, hash) : null;
     clearSession(c);
     if (!deleted) return c.json({ error: 'Your session has expired. Please sign in again.' }, 401);
     return c.json({ user: null }, 200);

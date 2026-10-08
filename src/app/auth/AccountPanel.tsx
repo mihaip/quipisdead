@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { User } from '../api';
+import CapturePanel from '../capture/CapturePanel';
 import PatForm from './PatForm';
 import type { useAccount } from './useAccount';
 
@@ -27,6 +28,7 @@ export default function AccountPanel({ user, account }: Props) {
         <p className="help">You can return to this account on this browser for 30 days. To sign in elsewhere, use your current Quip token.</p>
         {account.signOut.error && <p className="error" role="alert">{account.signOut.error.message}</p>}
       </section>
+      <CapturePanel userId={user.id} onSessionExpired={account.onSessionExpired} />
       <section className="card">
         <h2>Replace your token</h2>
         <p>Renew your connection when your Quip token expires or changes.</p>
@@ -35,7 +37,7 @@ export default function AccountPanel({ user, account }: Props) {
       </section>
       <section className="card danger-zone">
         <h2>Delete app account</h2>
-        <p>Delete your account details, saved token, and all browser sessions from this app. Your Quip account and Quip content are untouched.</p>
+        <p>Delete your account details, saved token, captured profile, and all browser sessions from this app. Your Quip account and Quip content are untouched.</p>
         <p className="help">Active app records are removed immediately. Cloudflare database backups can retain deleted records for up to 7 days on the Free plan or 30 days on the Paid plan.</p>
         {!confirmDelete ? (
           <button className="danger secondary" disabled={busy} onClick={() => setConfirmDelete(true)}>Delete app account…</button>

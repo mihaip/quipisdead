@@ -94,6 +94,6 @@ export async function deleteAccount(binding: Database, hash: string) {
   const result = await db.delete(users).where(inArray(users.id,
     db.select({ userId: sessions.userId }).from(sessions)
       .where(and(eq(sessions.tokenHash, hash), gt(sessions.expiresAt, Date.now()))),
-  )).run();
-  return result.meta.changes > 0;
+  )).returning({ id: users.id });
+  return result[0]?.id ?? null;
 }

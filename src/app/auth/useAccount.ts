@@ -18,6 +18,10 @@ export function useAccount() {
     // An older in-flight profile read must not restore signed-out UI.
     await queryClient.cancelQueries({ queryKey: sessionKey });
     queryClient.setQueryData(sessionKey, data);
+    if (!data.user) {
+      await queryClient.cancelQueries({ queryKey: ['capture'] });
+      queryClient.removeQueries({ queryKey: ['capture'] });
+    }
   }
 
   async function onError(error: Error) {
@@ -48,5 +52,5 @@ export function useAccount() {
     onError,
   });
 
-  return { session, signIn, replacePat, signOut, deleteAccount, notice };
+  return { session, signIn, replacePat, signOut, deleteAccount, notice, onSessionExpired: onError };
 }

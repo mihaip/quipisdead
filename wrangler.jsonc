@@ -3,7 +3,7 @@
   "name": "quipisdead",
   "account_id": "2ccb840de076261467812cbc32f8aa47",
   "workers_dev": true,
-  "main": "src/worker/index.ts",
+  "main": "src/worker/entry.ts",
   "compatibility_date": "2026-10-06",
   "d1_databases": [
     {
@@ -15,6 +15,36 @@
   ],
   "assets": {
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": [
+      "/api/*"
+    ]
+  },
+  // Retire the provisioned coordinator namespace; capture now uses D1 and Queues.
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "CaptureCoordinator"
+      ]
+    },
+    {
+      "tag": "v2",
+      "deleted_classes": [
+        "CaptureCoordinator"
+      ]
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "CAPTURE_QUEUE",
+        "queue": "quipisdead-capture"
+      }
+    ]
+  },
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
   }
 }

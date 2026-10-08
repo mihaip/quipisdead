@@ -113,7 +113,7 @@ App access must survive token expiry and eventual Quip shutdown for the short re
 
 ### Implemented account/session slice
 
-The October 7, 2026 slice uses one shared Cloudflare D1 database for app users, credentials, and sessions, behind the existing React/Vite SPA and Hono Worker. It has no KV, Durable Objects, capture jobs, queues, or archive artifacts. Drizzle's SQLite schema and SQL-style query builder infer persistence results through Hono to the frontend, without hand-maintained profile row interfaces. Focused persistence functions keep this boundary small; later capture infrastructure remains a separate implementation decision.
+The October 7, 2026 slice uses one shared Cloudflare D1 database for app users, credentials, and sessions, behind the existing React/Vite SPA and Hono Worker. The following profile-capture slice adds a separate consumer Worker, native Queue retries and D1 job state; archive artifacts and KV remain unimplemented. Drizzle's SQLite schema and SQL-style query builder infer persistence results through Hono to the frontend, without hand-maintained profile row interfaces. Focused persistence functions keep this boundary small; later capture infrastructure remains a separate implementation decision.
 
 Drizzle ORM uses its native D1 driver over the existing binding, with query logging disabled. Drizzle Kit generates reviewable SQL from `src/worker/db/schema.ts` using the committed migration snapshots; Wrangler applies migrations locally or remotely. The initial `0000_accounts.sql` is generated directly from the Drizzle schema, including the composite identity index, foreign keys, and session indexes. This setup needs no runtime migration runner, relation declarations, repository classes, or schema push. [Drizzle D1 support](https://orm.drizzle.team/docs/sqlite/connect-cloudflare-d1), [typed batches](https://orm.drizzle.team/docs/sqlite/batch-api), [migration generation](https://orm.drizzle.team/docs/drizzle-kit-generate).
 
@@ -187,23 +187,22 @@ Failure to render one feature must preserve its raw content and visibly report t
 
 ## 6. Cloudflare architecture
 
-The current account slice runs in one Worker with a shared D1 database. The diagram below is the proposed later capture architecture; only the browser, API, D1 account storage, and Quip identity validation are implemented today.
+The account API runs in the web Worker, with a separate Queue consumer Worker and shared D1 storage for capture jobs and results. The current capture reads only current-user identity and retains its latest normalized profile in D1. The diagram below remains the broader proposed architecture; R2, artifact building, discovery, full explorer and downloads are not implemented.
 
 ```mermaid
 flowchart LR
   Browser[Web app] --> API[Worker: sessions and export API]
-  API --> D1[Shared D1: app accounts, credentials and sessions]
-  API --> Coordinator[Per-account Durable Object: job state and scheduler]
-  Coordinator --> Queue[Queues: bounded capture tasks]
+  API --> D1[Shared D1: app accounts, credentials, sessions and capture jobs]
+  API --> Queue[Queues: bounded capture tasks]
   Queue --> Capture[Capture Worker]
   Capture --> Quip[Quip Automation API]
   Capture --> R2[Private R2: raw captures and files]
-  Capture --> Coordinator
-  Coordinator --> Packager[Artifact builder]
+  Capture --> D1
+  Capture --> Packager[Artifact builder]
   R2 --> Packager
   Packager --> R2
   API --> Explorer[Explorer: captured indexes and sanitized views]
-  Coordinator --> Explorer
+  D1 --> Explorer
   R2 --> Explorer
   API --> Download[Authenticated download]
   R2 --> Download
@@ -211,7 +210,7 @@ flowchart LR
 
 The implemented web/backend stack is a client-rendered React/Vite SPA with a Hono API in one Cloudflare Worker, using Hono's inferred client types and TanStack Query. Later acquisition/normalization logic should remain in ordinary TypeScript modules callable by HTTP and background handlers. SSR is not required.
 
-The shared D1 database is the chosen app-account, credential, and session store; it should not hold every document body. A proposed later SQLite-backed Durable Object per source account can own work scheduling, leases, compact normalized explorer indexes and user-level rate limiting when those execution needs justify it. Add company-level coordination when multiple hosted users share a company limit. Use R2 for raw bodies, files and final artifacts. Credential replacement already uses D1 and does not require a Durable Object.
+The shared D1 database stores app accounts, credentials, sessions and capture jobs; it should not hold every document body. The implemented current-user slice uses native Queue delivery/retries and permanent job rows, append-only progress events, atomic D1 claims and job/result/completion-event commits. A scheduled handler recovers pending submissions, and a dead-letter consumer records exhausted delivery failures. Broader scheduling, explorer indexes and user/company rate limiting should build on this simple structure until concrete execution needs justify additional coordination. Use R2 for raw bodies, files and final artifacts.
 
 Queues deliver bounded jobs; the persisted task ledger is authoritative. Workflows are an alternative for phase orchestration, not an additional requirement in v1. Avoid one enormous workflow with a step per record.
 
@@ -230,13 +229,13 @@ SQLite WASM's convenience export serializes the database into a complete `Uint8A
 
 | Storage/assembly choice | Decision |
 | --- | --- |
-| SQLite-backed Durable Object | Use for the live job ledger and explorer indexes. Its managed database is not an ordinary downloadable file; no binary export is assumed. |
+| Shared D1 | Use for the live job ledger; evaluate compact explorer indexes as that slice is implemented. This operational database is separate from the portable archive index. |
 | Per-user D1 | No need for v1. Modern D1 export is SQL; binary `dump()` only applies to old alpha databases. It does not remove the assembly step. |
 | Worker WASM builder | Preferred first implementation for a measured, bounded portable index. The account's desktop-cache size does not predict this index's size. |
 | Browser SQLite with OPFS | Candidate fallback for indexes beyond the Worker budget, keeping hosting Workers-only. Requires a browser Web Worker, sufficient storage and a packaging tab; this is separate from unattended hosted capture. Validate resumable construction and streaming file extraction, rather than using a whole-file serialization helper. |
 | Custom page-backed VFS / Container | Future alternatives if measurements justify them. Neither is a v1 dependency; a custom VFS adds substantial complexity. |
 
-[Durable Object storage](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/), [D1 export](https://developers.cloudflare.com/d1/best-practices/import-export-data/), [D1 binary-dump caveat](https://developers.cloudflare.com/d1/worker-api/d1-database/), [SQLite browser persistence](https://sqlite.org/wasm/doc/trunk/persistence.md).
+[D1 export](https://developers.cloudflare.com/d1/best-practices/import-export-data/), [D1 binary-dump caveat](https://developers.cloudflare.com/d1/worker-api/d1-database/), [SQLite browser persistence](https://sqlite.org/wasm/doc/trunk/persistence.md).
 
 **Packaging gate:** test representative and adversarial indexes, many small files, a multi-gigabyte streamed blob set, interruption at each multipart boundary, deterministic retry, ZIP64 interoperability and SQLite integrity. Measure peak memory and CPU in the hosted runtime, including concurrent work. Set the v1 size limit from these results, not the 202 MB desktop cache. Above the verified limit, retain captures and explain the packaging limitation with a raw recovery download; do not silently omit rows or label a SQL dump as SQLite. A supported large-index fallback is required before advertising unbounded account sizes.
 
@@ -246,7 +245,7 @@ Queue messages identify tasks; they do not contain credentials or large content.
 
 Quip documents rate limiting with HTTP 503, and inspected exporters already handle that case. Classify throttling using response details/reset headers, distinguish ordinary service failures, and handle 429 as well. Do not rely on HTTP 429 alone. Include a 503-with-reset fixture without deliberately exhausting a real account quota.
 
-Handle rate limits with persisted `not_before` times and alarms; do not burn retries while waiting for an hour boundary. Back off with jitter on transient failures. Pause for expired credentials, record per-item access failures, and distinguish job-wide authentication failure from one inaccessible thread. A poison item must not prevent delivery of the rest of the archive.
+Handle rate limits with persisted `not_before` times and delayed Queue delivery; do not burn retries while waiting for an hour boundary. Back off with jitter on transient failures. Pause for expired credentials, record per-item access failures, and distinguish job-wide authentication failure from one inaccessible thread. A poison item must not prevent delivery of the rest of the archive.
 
 The specification publishes defaults of 50 requests/minute and 750/hour per user, plus 600/minute per company; bulk exports have a separate document quota. The personal-account probes instead reported a user limit of 1,000 on a minute-reset header and a company limit of 600. This does not prove an hourly limit is absent. Use returned headers and observed behavior rather than hardcoded throughput assumptions. An illustrative 60,000-call export has an 80-hour lower bound at 750 calls/hour, before retries and generation delays. Long-running resumability is essential. [Quip rate limits](https://quip.com/dev/automation/documentation/current#section/Rate-Limits).
 
@@ -290,7 +289,7 @@ Investigate endpoint behavior using the user's own sessions after the API baseli
 
 **Milestone B — preservation core.** Capture raw responses and blobs, traverse all pages and both message types, track provenance, and produce a SQLite bundle plus coverage report. Add the folder/document explorer and low-level inspector over captured data. Keep normalization replayable. Test timestamp ties, repeated full pages, at least three HTML pages, separate paginated comment/edit streams, message-only attachments, duplicate titles, unresolved anchors, expired cursors, permission errors, unknown payload fields and source mutation during capture. Verify that bundle object references resolve to local files without hosted services.
 
-**Milestone C — hosted resumability.** Add the Cloudflare coordinator and queue execution, secure connection/recovery, cancellation, progress, partial download and retention cleanup. Demonstrate crash/retry recovery, token replacement, duplicate delivery and deletion fencing. Complete Workers-only SQLite assembly and resumable ZIP64 packaging spikes before committing to public size limits; validate browsing without source credentials.
+**Milestone C — hosted resumability.** Extend D1 job state and native Queue execution with secure connection/recovery, cancellation, progress, partial download and retention cleanup. Demonstrate crash/retry recovery, token replacement, duplicate delivery and deletion fencing. Complete Workers-only SQLite assembly and resumable ZIP64 packaging spikes before committing to public size limits; validate browsing without source credentials.
 
 **Milestone D — account pilot.** Run the ten-year account, compare inventories and representative content with Quip, verify hashes, SQLite integrity and local object references, and measure throughput/cost. Confirm that no credentials appear in logs or downloads. Publish the precise supported-feature matrix and known gaps.
 

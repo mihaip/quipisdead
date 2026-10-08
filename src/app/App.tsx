@@ -30,7 +30,7 @@ export default function App() {
           <p className="help privacy-note">This hosted service has access to the Quip data your token permits. You can sign out or delete your app account at any time.</p>
         </section>
       ))}
-      <footer>Account connection is available now. Archiving and the data explorer are coming next.</footer>
+      <footer>Account connection and profile capture are available now. Full archives and the data explorer are coming next.</footer>
     </main>
   );
 }

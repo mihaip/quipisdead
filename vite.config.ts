@@ -6,6 +6,8 @@ export default defineConfig({
   plugins: [
     react(),
     cloudflare({
+      auxiliaryWorkers: [{ configPath: 'wrangler.capture.jsonc' }],
+      remoteBindings: false,
       persistState: { path: process.env.QUIP_LOCAL_STATE_PATH ?? '.wrangler/state' },
     }),
   ],

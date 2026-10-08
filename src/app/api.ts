@@ -11,7 +11,7 @@ export class ApiError extends Error {
   }
 }
 
-async function readResponse<T extends ClientResponse<{ error: string } | { user: unknown }, StatusCode, 'json'>>(
+async function readResponse<T extends ClientResponse<{ error: string } | object, StatusCode, 'json'>>(
   request: Promise<T>,
 ) {
   const response = await request;
@@ -32,3 +32,7 @@ export const signOut = () => readResponse(client.api.auth['sign-out'].$post());
 export const deleteAccount = () => readResponse(client.api.auth.account.$delete());
 
 export type User = NonNullable<Awaited<ReturnType<typeof getSession>>['user']>;
+
+export const getCapture = (signal: AbortSignal) =>
+  readResponse(client.api.capture.$get({}, { init: { signal } }));
+export const startCapture = () => readResponse(client.api.capture.$post());
